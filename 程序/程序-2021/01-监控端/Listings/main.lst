@@ -1,0 +1,907 @@
+C51 COMPILER V9.60.0.0   MAIN                                                              06/01/2021 22:07:00 PAGE 1   
+
+
+C51 COMPILER V9.60.0.0, COMPILATION OF MODULE MAIN
+OBJECT MODULE PLACED IN .\Objects\main.obj
+COMPILER INVOKED BY: C:\Keil_v5\C51\BIN\C51.EXE Main\main.c LARGE OMF2 OPTIMIZE(8,SPEED) BROWSE INCDIR(..\STC8_I2C_OLED_
+                    -Example;.\OLED_DSP;.\User_DSP;.\Common;.\Main) DEBUG PRINT(.\Listings\main.lst) TABS(2) OBJECT(.\Objects\main.obj)
+
+line level    source
+
+   1          #include <stc8fxx.h>
+   2          //OLED
+   3          #include "intrins.h"
+   4          #include "main.h"
+   5          #include "i2c.h"
+   6          #include "SSD1306.h"
+   7          #include "GUI.h"
+   8          #include "font.h"
+   9          #include "delay.h"
+  10          ////时间
+  11          
+  12          #define uchar unsigned char
+  13          #define uint unsigned int
+  14          
+  15          void oled_display(void);
+  16          void key_scan();
+  17          void deal_date(); //数据处理
+  18          void buzzer_mode(uchar mode);//蜂鸣器
+  19          uint buzzer_count=0;
+  20          uchar buzzer_step=1;
+  21          
+  22          //菜单
+  23          uchar DIST[2]={0xe9,0x01};//489
+  24          uint DIST_temp=200;
+  25          uint water_height=10,pot_height=1200;
+  26          uchar water_height_score=50;
+  27          
+  28          uchar cou=0,sec=0,min=0,SendDate_count=0;
+  29          uchar ruler_online_state=0;  //超声波测距在线标志
+  30          uint  ruler_online_time=0; //水泵在线计时
+  31          uchar pump_online_state=0;   //水泵在线标志
+  32          uint  pump_online_time=0;
+  33          
+  34          uchar pump_power=0;//水泵启停标志
+  35          uchar pump_power_real=0;//远程端  水泵工作状态回传   
+  36          
+  37          uchar down_state=0;  //数据下载标志
+  38          uint down_state_time=0; //在线计时
+  39          
+  40          uchar mode_state=0; //模式 0 自动   1手动
+  41          uchar message_state=1;//状态提示栏
+  42          uchar menu=1;//菜单 1 主页    2 设置—1    3  设置-2
+  43          uchar pump_auto_sign=0;//自动抽水标志  1则 抽水前不提醒 全自动
+  44          uchar set_state=1;//设置菜单内滚动标志
+  45          uint DIST_H=150;DIST_L=600;//水位上下限
+  46          
+  47          uchar pump_error_time_set=30;//水泵异常延时时间设定值  初始化为30秒  30秒水位未上升则视为异常
+  48          uchar pump_error_time=0;   //水泵异常延时时间
+  49          uint  DIST_last=0;       
+  50          uint  pump_error_count=0;
+  51          uchar buzzer_off=0;//消音标志
+  52          
+  53          uchar send_add=0;//发送数据 目标设备地址
+  54          uchar add=0;
+C51 COMPILER V9.60.0.0   MAIN                                                              06/01/2021 22:07:00 PAGE 2   
+
+  55          
+  56          sbit key1=P1^6;
+  57          sbit key2=P1^7;
+  58          sbit key3=P5^4;
+  59          sbit buzzer=P1^2;
+  60          sbit test=P3^6;
+  61          sbit set_jdy40=P1^3;
+  62          //sbit key5=P3^6;
+  63          void oled_display(void);
+  64          void SendDate();
+  65          void RecDate();
+  66          void time_init (void);
+  67          void state_deal();
+  68          /*******************************uart*************************************/
+  69          bit busy,uart_state=0;
+  70          uchar wptr=0,temp;
+  71          uchar cou_uart=0;
+  72          uchar rptr;
+  73          uchar  ture_state=0;
+  74          uchar buffer[32],Date_Send[3];//接收和发送的数据数组
+  75          uchar date_now=0x00,date_last=0x00;
+  76          uchar RX_begin=0;RX_finish=0;
+  77          uchar date_finish_now=0x00;date_finish_last=0x00;
+  78          uchar buffer_begin=0;  //当前帧数据起始位置
+  79          
+  80          void UartIsr() interrupt 4 using 1
+  81          {
+  82   1          if (TI)
+  83   1          {
+  84   2              TI = 0;
+  85   2              busy = 0;
+  86   2          }
+  87   1          if (RI)
+  88   1          {
+  89   2          RI = 0;
+  90   2              date_now = SBUF;
+  91   2              if((date_now==0x5a)&&(date_last==0xaa)){    //起始码为  aa   5a
+  92   3            RX_begin=1;        //收到起始码
+  93   3            buffer_begin=wptr+1;//数据内容第一字节位置
+  94   3            }
+  95   2          if(RX_begin==1){
+  96   3            buffer[wptr]=date_now;
+  97   3          }
+  98   2          if(wptr>4){
+  99   3            date_finish_now=buffer[wptr];date_finish_last=buffer[wptr-1];
+ 100   3            if((date_finish_now==0xc3)&&(date_finish_last==0xcc)){//结束码  cc  c3
+ 101   4              RX_begin=0;//结束接收这一帧数据
+ 102   4              wptr=0; 
+ 103   4              RX_finish=1;//完成接收一帧数据
+ 104   4            }
+ 105   3          }
+ 106   2          wptr++;
+ 107   2          if(wptr>30){wptr=0;}
+ 108   2          date_last=date_now;
+ 109   2            cou_uart=0;  
+ 110   2          }
+ 111   1      }
+ 112          
+ 113          void UartInit() //9600bps@24.000MHz
+ 114          {
+ 115   1        SCON = 0x50;    //8位数据,可变波特率
+ 116   1        AUXR |= 0x01;   //串口1选择定时器2为波特率发生器
+C51 COMPILER V9.60.0.0   MAIN                                                              06/01/2021 22:07:00 PAGE 3   
+
+ 117   1        AUXR |= 0x04;   //定时器2时钟为Fosc,即1T
+ 118   1        T2L = 0x8F;   //设定定时初值
+ 119   1        T2H = 0xFD;   //设定定时初值
+ 120   1        AUXR |= 0x10;   //启动定时器2
+ 121   1          wptr = 0x00;
+ 122   1          rptr = 0x00;
+ 123   1          busy = 0;
+ 124   1      }
+ 125          
+ 126          void UartSend(char dat)
+ 127          {
+ 128   1          while (busy);
+ 129   1          busy = 1;
+ 130   1          SBUF = dat;
+ 131   1      }
+ 132          
+ 133          void UartSendStr(char *p)
+ 134          {
+ 135   1          while (*p)
+ 136   1          {
+ 137   2              UartSend(*p++);
+ 138   2          }
+ 139   1      }
+ 140          /****************************************  EEPROM相关  ***************************************************
+             -/
+ 141          #define WD1 0x5a  
+ 142          #define WD2 0xa5
+ 143          
+ 144          #define ENABLE_ISP 0x82 
+ 145          typedef unsigned char      INT8U;         
+ 146          typedef unsigned int   INT16U;
+ 147          
+ 148          union union_temp16                               
+ 149          {
+ 150              INT16U un_temp16;
+ 151              INT8U  un_temp8[2];
+ 152          }my_unTemp16;
+ 153          
+ 154          INT8U Byte_Read(INT16U add);             
+ 155          void Byte_Program(INT16U add, INT8U ch);  
+ 156          void Sector_Erase(INT16U add);            
+ 157          void IAP_Disable(); 
+ 158          uchar first_online=0;  
+ 159          /*************************************  eeprom保存和读取  ************************************************
+             -***/
+ 160          void eeprom_read(){
+ 161   1      uchar date_L=0,date_H=0;//数据临时寄存
+ 162   1        pump_auto_sign  = Byte_Read(0x3501);    //读EEPROM的值
+ 163   1        mode_state      = Byte_Read(0x3502);    //读EEPROM的值
+ 164   1        pump_error_time_set = Byte_Read(0x3503);    //读EEPROM的值 
+ 165   1        date_L          = Byte_Read(0x3504);    
+ 166   1        date_H          = Byte_Read(0x3505);  
+ 167   1        DIST_L=date_H;             //低水位阈值数据
+ 168   1        DIST_L=(DIST_L<<8)+date_L;
+ 169   1        date_L          = Byte_Read(0x3506);     
+ 170   1        date_H          = Byte_Read(0x3507);  
+ 171   1        DIST_H=date_H;             //高水位阈值数据
+ 172   1        DIST_H=(DIST_H<<8)+date_L;
+ 173   1        first_online    = Byte_Read(0x3508); //首次上电标志
+ 174   1      } 
+ 175          void eeprom_save(){
+ 176   1      uchar date_L=0,date_H=0;
+C51 COMPILER V9.60.0.0   MAIN                                                              06/01/2021 22:07:00 PAGE 4   
+
+ 177   1        Sector_Erase(0x3501);           //擦除整个扇区
+ 178   1        Byte_Program(0x3501, pump_auto_sign);//抽水前提醒标志
+ 179   1        Byte_Program(0x3502, mode_state);  //模式 
+ 180   1        Byte_Program(0x3503, pump_error_time_set);  //异常检测时间
+ 181   1        date_L=DIST_L;    //分解uint
+ 182   1        date_H=(DIST_L>>8);
+ 183   1        Byte_Program(0x3504, date_L);      //低水位阈值数据
+ 184   1        Byte_Program(0x3505, date_H);
+ 185   1        date_L=DIST_H;
+ 186   1        date_H=(DIST_H>>8);
+ 187   1        Byte_Program(0x3506, date_L);     //高水位阈值数据
+ 188   1        Byte_Program(0x3507, date_H);
+ 189   1        Byte_Program(0x3508, 0xab);
+ 190   1      }
+ 191          void date_init(){
+ 192   1        eeprom_read();
+ 193   1        if(first_online!=0xab){
+ 194   2          pump_auto_sign=0;
+ 195   2          mode_state=0;
+ 196   2          pump_error_time_set=30;
+ 197   2          DIST_L=600;
+ 198   2          DIST_H=150;
+ 199   2          eeprom_save();
+ 200   2        } 
+ 201   1      }
+ 202          /************************************************主进程***************************************************
+             -*******************/
+ 203          void main()
+ 204          {
+ 205   1        set_jdy40=1;//透传模式
+ 206   1        date_init();//数据初始化 从EEPROM读参数
+ 207   1        buzzer_mode(1);//蜂鸣器初始化（静音）
+ 208   1        P_SW2 = 0x80;//使能访问扩展SFR  //P_SW2 = 0x00;//关闭访问扩展SFR 
+ 209   1        delay_ms(200);
+ 210   1        I2C_Init();//I2C总线初始化
+ 211   1        delay_ms(200);
+ 212   1        OLED_Init(); //OLED初始化
+ 213   1        delay_ms(200);
+ 214   1      
+ 215   1          Show_Str(48,1,"欢迎",16,0);
+ 216   1          OLED_P8x16Str(32,4,"WELCOME!");
+ 217   1        delay_ms(800);OLED_Clear();delay_ms(200); 
+ 218   1        UartInit();//串口初始化
+ 219   1          ES = 1;
+ 220   1          EA = 1;
+ 221   1        time_init ();//定时器初始化
+ 222   1      
+ 223   1        while(1)
+ 224   1        {   
+ 225   2            delay_ms(20);
+ 226   2          RecDate();  //处理接收到的数据
+ 227   2          deal_date();//数据处理
+ 228   2          state_deal();//状态识别,核心工作逻辑    
+ 229   2            oled_display(); //显示
+ 230   2            key_scan();   //按键扫描
+ 231   2            if(SendDate_count>=10){SendDate_count=0;SendDate();}//x*25ms 发送一次
+ 232   2      
+ 233   2        } 
+ 234   1      }
+ 235          /*********************************************状态判断，核心逻辑******************************************
+             -*********/
+ 236          void working_auto();   //自动工作模式核心逻辑
+C51 COMPILER V9.60.0.0   MAIN                                                              06/01/2021 22:07:00 PAGE 5   
+
+ 237          void working_manual(); //手动工作模式核心逻辑
+ 238          void pump_error_detect();//抽水异常检测
+ 239          void state_deal(){                //模式判断
+ 240   1        if(ruler_online_state==0){
+ 241   2          message_state=7;//"测量端未连接"
+ 242   2        }else{
+ 243   2          if(pump_online_state==0&&mode_state==0){   //水泵控制端未连接且自动模式
+ 244   3            message_state=3;//"水泵控制器未连接"
+ 245   3          }else if(pump_online_state==1&&mode_state==0){ //水泵控制端在线且自动模式---正常工作_自动模式
+ 246   3            working_auto();//自动模式正常工作 
+ 247   3          }else if(pump_online_state==1&&mode_state==1){ //手动模式 水泵控制器在线 ---提示可使用自动模式
+ 248   3            message_state=8;//"水泵控制器已连接，可使用自动模式"
+ 249   3          }else if(pump_online_state==0&&mode_state==1){ //水泵控制端离线 手动模式 ---正常工作_手动模式
+ 250   3            working_manual();//手动模式正常工作
+ 251   3          }
+ 252   2        } 
+ 253   1      }
+ 254          void working_auto(){                //自动模式
+ 255   1        if(DIST_temp>DIST_L){ //水位低于设置水位 
+ 256   2          if(pump_power==0&&pump_power_real==0){
+ 257   3            if(pump_auto_sign==0){           //抽水前提醒
+ 258   4              message_state=6;//"请按[启/停]抽水" 
+ 259   4              buzzer_mode(2);//蜂鸣器 0-关 1-报警 2-提醒 
+ 260   4            }else{
+ 261   4              pump_power=1;     //启动水泵
+ 262   4            }
+ 263   3          }else if(pump_power==1&&pump_power_real==0){
+ 264   3            message_state=9;//"水泵启动中..."
+ 265   3            buzzer_mode(0);
+ 266   3          }else if(pump_power==1&&pump_power_real==1){
+ 267   3      //      message_state=5;//"抽水中..."
+ 268   3            pump_error_detect();//抽水异常检测
+ 269   3          }else if(pump_power==0&&pump_power_real==1){
+ 270   3            message_state=10;//"水泵停止中..."
+ 271   3            buzzer_mode(0);
+ 272   3          }
+ 273   2        }else if((DIST_temp<=DIST_L)&&(DIST_temp>=DIST_H)){ //正常水位
+ 274   2          buzzer_mode(0);
+ 275   2          if(pump_power==0&&pump_power_real==0){
+ 276   3            message_state=1;//"水位正常" 
+ 277   3          }else if(pump_power==1&&pump_power_real==0){
+ 278   3            message_state=9;//"水泵启动中..."
+ 279   3          }else if(pump_power==1&&pump_power_real==1){
+ 280   3      //      message_state=5;//"抽水中..."
+ 281   3            pump_error_detect();//抽水异常检测
+ 282   3          }else if(pump_power==0&&pump_power_real==1){
+ 283   3            message_state=10;//"水泵停止中..."
+ 284   3          }   
+ 285   2        }else if((DIST_temp<DIST_H)){            //水位高
+ 286   2          pump_power=0;  //关闭水泵
+ 287   2          if(pump_power==0&&pump_power_real==0){
+ 288   3            message_state=11;//"水位高"
+ 289   3            buzzer_mode(0);
+ 290   3          }else if(pump_power==1&&pump_power_real==0){
+ 291   3            message_state=9;//"水泵启动中..."
+ 292   3            buzzer_mode(0);
+ 293   3          }else if(pump_power==1&&pump_power_real==1){
+ 294   3            message_state=5;//"抽水中..."
+ 295   3            buzzer_mode(1);//报警
+ 296   3          }else if(pump_power==0&&pump_power_real==1){
+ 297   3            message_state=10;//"水泵停止中..."
+ 298   3            buzzer_mode(0);
+C51 COMPILER V9.60.0.0   MAIN                                                              06/01/2021 22:07:00 PAGE 6   
+
+ 299   3          } 
+ 300   2        }   
+ 301   1      }
+ 302          void working_manual(){                   //手动模式
+ 303   1        if(DIST_temp>DIST_L){ //水位低于设置水位 
+ 304   2          if(pump_power==0){
+ 305   3            buzzer_mode(2);//蜂鸣器 0-关 1-报警 2-提醒 
+ 306   3            message_state=2;//"水位低"
+ 307   3          }else{
+ 308   3      //      message_state=5;//"抽水中..."
+ 309   3            pump_error_detect();//抽水异常检测
+ 310   3          }
+ 311   2          buzzer_off=0;//消音标志  不消音 ---按键消音
+ 312   2        }else if((DIST_temp<=DIST_L)&&(DIST_temp>=DIST_H)){ //正常水位 
+ 313   2          if(pump_power==0){
+ 314   3            buzzer_mode(0);
+ 315   3            message_state=1;//"水位正常"
+ 316   3          }else{
+ 317   3            pump_error_detect();//抽水异常检测   抽水中。。。
+ 318   3          }
+ 319   2          buzzer_off=0;//消音标志   
+ 320   2        }else if((DIST_temp<DIST_H)){            //水位高
+ 321   2          if(buzzer_off==0){      //未消音
+ 322   3            buzzer_mode(1);//报警
+ 323   3            message_state=11;//"水位高"   
+ 324   3          }else{
+ 325   3            buzzer_mode(0);//消音
+ 326   3            message_state=11;//"水位高"     
+ 327   3          } 
+ 328   2        }
+ 329   1      }
+ 330          void pump_error_detect(){//抽水异常检测  
+ 331   1        if(pump_error_count>39){//40*25ms=1s  定时器
+ 332   2          pump_error_count=0;
+ 333   2          if((DIST_temp+5)<DIST_last){  //水位上升5mm(测量误差3mm)，计时清零
+ 334   3            pump_error_time=0;     
+ 335   3          }else{
+ 336   3            pump_error_time++;    //否则计时加1
+ 337   3          }
+ 338   2          DIST_last=DIST_temp;//一秒 更新水位
+ 339   2        }
+ 340   1        if(pump_error_time>=pump_error_time_set){  //计时到达设定值
+ 341   2          buzzer_mode(1);//报警
+ 342   2          message_state=4;//"水泵异常或水不足"
+ 343   2        }else{
+ 344   2          buzzer_mode(0);
+ 345   2          message_state=5;//"抽水中..."
+ 346   2        }     
+ 347   1      }
+ 348          /*********************************************oled显示界面************************************************
+             -***/
+ 349          void oled_display(void)
+ 350          {  
+ 351   1      /**************************************主界面************************************************/    
+ 352   1        if(menu==1){      
+ 353   2          if(down_state==1){Show_Str(8,0,"三",16,0);}   //代替“↓”                        //第一行
+ 354   2          else{Show_Str(8,0,"  ",16,0);}
+ 355   2          if(ruler_online_state==1){Show_Str(24,0,"四",16,0);}   //代替 超声波图标
+ 356   2          else{Show_Str(24,0,"  ",16,0);}
+ 357   2          if(pump_online_state==1){Show_Str(48,0,"六",16,0);}     //代替 水泵图标
+ 358   2          else{Show_Str(48,0,"  ",16,0);}
+ 359   2          if(mode_state==1){Show_Str(88,0,"手动",16,0);}      //显示 自动模式 or 手动
+C51 COMPILER V9.60.0.0   MAIN                                                              06/01/2021 22:07:00 PAGE 7   
+
+ 360   2          else{Show_Str(88,0,"自动",16,0);}
+ 361   2        
+ 362   2          if(message_state==1){                                       //第二行
+ 363   3            Show_Str_Center(0,2,"    水位真常    ",16,0);   //居中显示  ‘真’代替‘正’
+ 364   3          }else if(message_state==2){
+ 365   3            Show_Str_Center(0,2,"     水位低     ",16,0); 
+ 366   3          }else if(message_state==3){
+ 367   3            Show_Str_Center(0,2,"水泵控制器未连接",16,0);
+ 368   3          }else if(message_state==4){
+ 369   3            Show_Str_Center(0,2,"水泵异常或水不足",16,0);
+ 370   3          }else if(message_state==5){
+ 371   3            Show_Str_Center(0,2,"    抽水中...   ",16,0);
+ 372   3          }else if(message_state==6){
+ 373   3            Show_Str_Center(0,2,"请按[启/停]抽水 ",16,0);
+ 374   3          }else if(message_state==7){
+ 375   3            Show_Str_Center(0,2,"  测量端未连接  ",16,0);
+ 376   3          }else if(message_state==8){
+ 377   3            Show_Str_Center(0,2," 可使用自动模式 ",16,0);
+ 378   3          }else if(message_state==9){
+ 379   3            Show_Str_Center(0,2," 水泵启动中...  ",16,0);
+ 380   3          }else if(message_state==10){
+ 381   3            Show_Str_Center(0,2," 水泵停止中...  ",16,0);
+ 382   3          }else if(message_state==11){
+ 383   3            Show_Str_Center(0,2,"     水位高     ",16,0); 
+ 384   3          }
+ 385   2        
+ 386   2          Show_Str(0,4,"实时测距:",16,0);             //第三行
+ 387   2          if(ruler_online_state==1){
+ 388   3            OLED_ShowNum(72,4,DIST_temp,4,16,0);//数字，长度
+ 389   3          }else{
+ 390   3            Show_Str(72,4," ---",16,0);
+ 391   3          } 
+ 392   2          Show_Str(104,4,"mm",16,0);
+ 393   2        
+ 394   2          
+ 395   2          Show_Str(0,6,"设置",16,0);                 //第四行
+ 396   2          Show_Str(44,6,"启/停",16,0);   
+ 397   2          Show_Str(95,6,"模式",16,0);
+ 398   2      /**************************************设置 菜单1************************************************/    
+ 399   2        }else if(menu==2){  
+ 400   2          if(set_state==1){                   //第一行
+ 401   3            Show_Str(0,0,"1. 高水位",16,1);           //反色显示
+ 402   3            OLED_ShowNum(72,0,DIST_H,4,16,1);//数字，长度
+ 403   3            Show_Str(104,0,"mm ",16,1); 
+ 404   3          }else{
+ 405   3            Show_Str(0,0,"1. 高水位",16,0);
+ 406   3            OLED_ShowNum(72,0,DIST_H,4,16,0);//数字，长度
+ 407   3            Show_Str(104,0,"mm ",16,0);   
+ 408   3          }
+ 409   2          if(set_state==2){                   //第二行
+ 410   3            Show_Str(0,2,"2. 低水位",16,1);           
+ 411   3            OLED_ShowNum(72,2,DIST_L,4,16,1);//数字，长度
+ 412   3            Show_Str(104,2,"mm ",16,1); 
+ 413   3          }else{
+ 414   3            Show_Str(0,2,"2. 低水位",16,0);
+ 415   3            OLED_ShowNum(72,2,DIST_L,4,16,0);//数字，长度
+ 416   3            Show_Str(104,2,"mm ",16,0);   
+ 417   3          }
+ 418   2          if(set_state==3){                   //第三行
+ 419   3            Show_Str(0,4,"3. 抽水前提醒 ",16,1);            
+ 420   3            if(pump_auto_sign==0){Show_Str(112,4,"开",16,1);}else{Show_Str(112,4,"关",16,1);} 
+ 421   3          }else{
+C51 COMPILER V9.60.0.0   MAIN                                                              06/01/2021 22:07:00 PAGE 8   
+
+ 422   3            Show_Str(0,4,"3. 抽水前提醒 ",16,0);            
+ 423   3            if(pump_auto_sign==0){Show_Str(112,4,"开",16,0);}else{Show_Str(112,4,"关",16,0);}   
+ 424   3          }
+ 425   2          Show_Str(8,6,"-",16,0);Show_Str(40,6,"下一项",16,0);Show_Str(112,6,"+",16,0); //第四行
+ 426   2      /**************************************设置 菜单2************************************************/  
+ 427   2        }else if(menu==3){
+ 428   2          if(set_state==1){                   //第一行
+ 429   3            Show_Str(0,0,"4. 异常检测 ",16,1);      
+ 430   3            OLED_ShowNum(96,0,pump_error_time_set,2,16,1);//数字，长度
+ 431   3            Show_Str(112,0,"秒",16,1); 
+ 432   3          }else{
+ 433   3            Show_Str(0,0,"4. 异常检测 ",16,0);      
+ 434   3            OLED_ShowNum(96,0,pump_error_time_set,2,16,0);//数字，长度
+ 435   3            Show_Str(112,0,"秒",16,0);    
+ 436   3          }
+ 437   2          if(set_state==2){                   //第二行
+ 438   3            Show_Str(0,2,"5. 关  于       ",16,1);            
+ 439   3          }else{
+ 440   3            Show_Str(0,2,"5. 关  于       ",16,0);  
+ 441   3          }
+ 442   2          if(set_state==3){                   //第三行
+ 443   3            Show_Str(0,4,"6. 退  出       ",16,1);            
+ 444   3          }else{
+ 445   3            Show_Str(0,4,"6. 退  出       ",16,0);  
+ 446   3          }
+ 447   2          Show_Str(8,6,"-",16,0);Show_Str(40,6,"下一项",16,0);Show_Str(112,6,"+",16,0); //第四行    
+ 448   2        }
+ 449   1      }
+ 450          /***************************************按键相关******************************************************/
+ 451          void key_scan(){
+ 452   1      /*************************************HOME*****************************************/
+ 453   1        if(menu==1){
+ 454   2          if(key1==0){    
+ 455   3            DelayMs(15);
+ 456   3      //      buzzer_mode(3);//响一声
+ 457   3            if(key1==0){
+ 458   4               while(key1==0){Show_Str(0,6,"设置",16,1);}//等待按键松开
+ 459   4             menu=2; //进入设置菜单
+ 460   4             buzzer_off=1;//消音
+ 461   4             OLED_Clear();delay_ms(200);
+ 462   4            }
+ 463   3          }
+ 464   2          if(key2==0){     
+ 465   3            DelayMs(15);
+ 466   3            if(key2==0){
+ 467   4               while(key2==0){Show_Str(44,6,"启/停",16,1);}//等待按键松开
+ 468   4             pump_power=!pump_power;//水泵启停标志
+ 469   4             buzzer_off=1;//消音
+ 470   4            }
+ 471   3          }
+ 472   2          if(key3==0){
+ 473   3            DelayMs(15);
+ 474   3            if(key3==0){
+ 475   4              while(key3==0){Show_Str(95,6,"模式",16,1);}
+ 476   4              mode_state=!mode_state;
+ 477   4              pump_power=0;//切换模式后 水泵标志清零
+ 478   4              buzzer_off=1;//消音
+ 479   4              eeprom_save();
+ 480   4            }
+ 481   3          }
+ 482   2      /************************************SET_1*************************************/
+ 483   2        }else if(menu==2){
+C51 COMPILER V9.60.0.0   MAIN                                                              06/01/2021 22:07:00 PAGE 9   
+
+ 484   2          if(set_state==1){   //高水位
+ 485   3            if(key1==0){     
+ 486   4              DelayMs(15);
+ 487   4              if(key1==0){   //-
+ 488   5                 while(key1==0){Show_Str(8,6,"-",16,1);}//等待按键松开
+ 489   5               DIST_H-=10;if(DIST_H<=50){DIST_H=50;}
+ 490   5              }
+ 491   4            }
+ 492   3            if(key2==0){    
+ 493   4              DelayMs(15);
+ 494   4              if(key2==0){
+ 495   5                 while(key2==0){Show_Str(40,6,"下一项",16,1);}//等待按键松开
+ 496   5               set_state=2;//切换下一项
+ 497   5              }
+ 498   4            }
+ 499   3            if(key3==0){
+ 500   4              DelayMs(15);
+ 501   4              if(key3==0){
+ 502   5                while(key3==0){Show_Str(112,6,"+",16,1);}
+ 503   5                DIST_H+=10;if(DIST_H>=DIST_L){DIST_H=DIST_L-10;}
+ 504   5              }
+ 505   4            }
+ 506   3          }
+ 507   2          if(set_state==2){    //低水位
+ 508   3            if(key1==0){     
+ 509   4              DelayMs(15);
+ 510   4              if(key1==0){   //-
+ 511   5                 while(key1==0){Show_Str(8,6,"-",16,1);}//等待按键松开
+ 512   5               DIST_L-=10;if(DIST_L<=DIST_H){DIST_L=DIST_H+10;}
+ 513   5              }
+ 514   4            }
+ 515   3            if(key2==0){    
+ 516   4              DelayMs(15);
+ 517   4              if(key2==0){
+ 518   5                 while(key2==0){Show_Str(40,6,"下一项",16,1);}//等待按键松开
+ 519   5               set_state=3;//切换下一项
+ 520   5              }
+ 521   4            }
+ 522   3            if(key3==0){
+ 523   4              DelayMs(15);
+ 524   4              if(key3==0){
+ 525   5                while(key3==0){Show_Str(112,6,"+",16,1);}
+ 526   5                DIST_L+=10;if(DIST_L>=2500){DIST_L=2500;}
+ 527   5              }
+ 528   4            }
+ 529   3          }
+ 530   2          if(set_state==3){   //抽水前提醒
+ 531   3            if(key1==0){     
+ 532   4              DelayMs(15);
+ 533   4              if(key1==0){   //-
+ 534   5                 while(key1==0){Show_Str(8,6,"-",16,1);}//等待按键松开
+ 535   5               pump_auto_sign=!pump_auto_sign;
+ 536   5              }
+ 537   4            }
+ 538   3            if(key2==0){    
+ 539   4              DelayMs(15);
+ 540   4              if(key2==0){
+ 541   5                 while(key2==0){Show_Str(40,6,"下一项",16,1);}//等待按键松开
+ 542   5               set_state=1;//切换下一项
+ 543   5               menu=3;OLED_Clear();delay_ms(200);
+ 544   5              }
+ 545   4            }
+C51 COMPILER V9.60.0.0   MAIN                                                              06/01/2021 22:07:00 PAGE 10  
+
+ 546   3            if(key3==0){
+ 547   4              DelayMs(15);
+ 548   4              if(key3==0){
+ 549   5                while(key3==0){Show_Str(112,6,"+",16,1);}
+ 550   5                pump_auto_sign=!pump_auto_sign;
+ 551   5              }
+ 552   4            }
+ 553   3          }   
+ 554   2      /************************************SET_2***************************************/
+ 555   2        }else if(menu==3){     //异常检测时间
+ 556   2          if(set_state==1){
+ 557   3            if(key1==0){     
+ 558   4              DelayMs(15);
+ 559   4              if(key1==0){   //-
+ 560   5                 while(key1==0){Show_Str(8,6,"-",16,1);}//等待按键松开
+ 561   5               pump_error_time_set--;if(pump_error_time_set>100){pump_error_time_set=0;}
+ 562   5              }
+ 563   4            }
+ 564   3            if(key2==0){    
+ 565   4              DelayMs(15);
+ 566   4              if(key2==0){
+ 567   5                 while(key2==0){Show_Str(40,6,"下一项",16,1);}//等待按键松开
+ 568   5               set_state=2;//切换下一项
+ 569   5              }
+ 570   4            }
+ 571   3            if(key3==0){
+ 572   4              DelayMs(15);
+ 573   4              if(key3==0){
+ 574   5                while(key3==0){Show_Str(112,6,"+",16,1);}
+ 575   5                pump_error_time_set++;if(pump_error_time_set>99){pump_error_time_set=99;}
+ 576   5              }
+ 577   4            }
+ 578   3          }
+ 579   2          if(set_state==2){       //关于
+ 580   3            if(key1==0){     
+ 581   4              DelayMs(15);
+ 582   4              if(key1==0){   //-
+ 583   5                 while(key1==0){Show_Str(8,6,"-",16,1);}//等待按键松开
+ 584   5            
+ 585   5              }
+ 586   4            }
+ 587   3            if(key2==0){    
+ 588   4              DelayMs(15);
+ 589   4              if(key2==0){
+ 590   5                 while(key2==0){Show_Str(40,6,"下一项",16,1);}//等待按键松开
+ 591   5               set_state=3;//切换下一项
+ 592   5              }
+ 593   4            }
+ 594   3            if(key3==0){
+ 595   4              DelayMs(15);
+ 596   4              if(key3==0){
+ 597   5                while(key3==0){Show_Str(112,6,"+",16,1);}
+ 598   5              
+ 599   5              }
+ 600   4            }
+ 601   3          }
+ 602   2          if(set_state==3){   //退出
+ 603   3            if(key1==0){     
+ 604   4              DelayMs(15);
+ 605   4              if(key1==0){   //-
+ 606   5                 while(key1==0){Show_Str(8,6,"-",16,1);}//等待按键松开
+ 607   5               menu=1;set_state=1;OLED_Clear();delay_ms(200);eeprom_save();
+C51 COMPILER V9.60.0.0   MAIN                                                              06/01/2021 22:07:00 PAGE 11  
+
+ 608   5              }
+ 609   4            }
+ 610   3            if(key2==0){    
+ 611   4              DelayMs(15);
+ 612   4              if(key2==0){
+ 613   5                 while(key2==0){Show_Str(40,6,"下一项",16,1);}//等待按键松开
+ 614   5               set_state=1;//切换下一项
+ 615   5               menu=2;OLED_Clear();delay_ms(200);
+ 616   5              }
+ 617   4            }
+ 618   3            if(key3==0){
+ 619   4              DelayMs(15);
+ 620   4              if(key3==0){
+ 621   5                while(key3==0){Show_Str(112,6,"+",16,1);}
+ 622   5                menu=1;set_state=1;OLED_Clear();delay_ms(200);eeprom_save();
+ 623   5              }
+ 624   4            }
+ 625   3          }     
+ 626   2        }
+ 627   1      
+ 628   1      }
+ 629          /***************************************蜂鸣器******************************************************/
+ 630          void buzzer_mode(uchar buz_mode_new){//  0-关 1-报警 2-提醒  3-响一声   定时器： buzzer_count  25ms
+ 631   1        static uchar buz_mode;
+ 632   1        if(buz_mode_new == 0 || buz_mode_new == 1 || \
+ 633   1           buz_mode_new == 2 || buz_mode_new == 3)
+ 634   1        {
+ 635   2          buz_mode = buz_mode_new;
+ 636   2        }
+ 637   1        if(buz_mode==0){       //关
+ 638   2          buzzer=1;
+ 639   2          buzzer_step=1;
+ 640   2        }else if(buz_mode==1){     //报警
+ 641   2          if(buzzer_count>19){   //间隔20*25ms=500ms
+ 642   3            buzzer=!buzzer;
+ 643   3            buzzer_count=0;
+ 644   3          }
+ 645   2        }else if(buz_mode==2){      //提醒
+ 646   2          if(buzzer_step==1){
+ 647   3            buzzer=1;
+ 648   3            buzzer_step=2;
+ 649   3          }else if(buzzer_step==2){
+ 650   3            buzzer=0;
+ 651   3            buzzer_step=3;
+ 652   3            buzzer_count=0;
+ 653   3          }else if(buzzer_step==3&&buzzer_count>11){ //12*25ms 响 300ms
+ 654   3            buzzer=1;
+ 655   3            buzzer_step=4;
+ 656   3            buzzer_count=0;
+ 657   3          }else if(buzzer_step==4&&buzzer_count>59){  //60*25ms  静音1500ms
+ 658   3            buzzer_step=1;    
+ 659   3          }
+ 660   2        }else if(buz_mode==3){    //响一声
+ 661   2          buzzer=0;
+ 662   2          delay_ms(100);
+ 663   2          buzzer=1;
+ 664   2        }
+ 665   1      }
+ 666          /*****************************************发送数据、接收数据处理******************************************
+             -*****************/
+ 667          void SendDate(){
+ 668   1        uchar a,b;
+C51 COMPILER V9.60.0.0   MAIN                                                              06/01/2021 22:07:00 PAGE 12  
+
+ 669   1        if(menu==1){Show_Str(0,0,"↑",16,0);}
+ 670   1        if(send_add==0){      //发送给测量端
+ 671   2            Date_Send[0]=0xab;   //本设备地址AB
+ 672   2          Date_Send[1]=0xcd;   //目标设备地址
+ 673   2          Date_Send[2]=0x00;  
+ 674   2        }else if(send_add==1){    //发送给水泵控制器
+ 675   2            Date_Send[0]=0xab;    
+ 676   2          Date_Send[1]=0xef;    //目标设备地址
+ 677   2          Date_Send[2]=pump_power;
+ 678   2        }
+ 679   1        UartSend(0xaa);//起始码
+ 680   1          UartSend(0x5a);
+ 681   1        for(b=0;b<3;b++){     //发送三遍
+ 682   2            for (a=0; a<3; a++)
+ 683   2            {
+ 684   3               UartSend(Date_Send[a]);
+ 685   3            }
+ 686   2        }
+ 687   1        UartSend(0xcc);//结束码
+ 688   1        UartSend(0xc3); 
+ 689   1        DelayMs(15);
+ 690   1        send_add=!send_add; //切换当前通讯设备
+ 691   1        if(menu==1){Show_Str(0,0,"  ",16,0);}     
+ 692   1      }
+ 693          void RecDate(){
+ 694   1      uchar i=0;
+ 695   1      i=buffer_begin;
+ 696   1        if(RX_finish==1){
+ 697   2           //重复校验
+ 698   2           if(buffer[i]==buffer[i+3] && buffer[i]==buffer[i+6] && \
+ 699   2              buffer[i+1]==buffer[i+4] && buffer[i+1]==buffer[i+7] && \
+ 700   2              buffer[i+2]==buffer[i+5] && buffer[i+2]==buffer[i+8])//校验无误
+ 701   2           {
+ 702   3              test=!test;
+ 703   3            down_state=1; //显示“↓”标志 
+ 704   3            add=buffer[i];
+ 705   3              if(add==0xcd){      //若第一位数据为 0xcd则为测量端传来  0xef 为水泵控制端
+ 706   4              DIST[0]=buffer[i+1];      //超声波测距数据
+ 707   4              DIST[1]=buffer[i+2];
+ 708   4                  ruler_online_state=1;   //显示超声波图标
+ 709   4                ruler_online_time=0;//显示超声波图标  计时    如果收到一次数据则认为已经连接      
+ 710   4            }else if(add==0xef){
+ 711   4                pump_power_real=buffer[i+1];//水泵实际状态回传
+ 712   4                pump_online_state=1;   //显示水泵在线图标
+ 713   4              pump_online_time=0;   //水泵在线图标  计时
+ 714   4            }   
+ 715   3           }
+ 716   2           wptr=0;
+ 717   2           RX_finish=0; //串口收到数据标志 清零 等待下次接收到数据
+ 718   2         }
+ 719   1      }
+ 720          void deal_date(){  //数据处理
+ 721   1        DIST_temp=DIST[1];           //合并测距数据 精度mm
+ 722   1        DIST_temp=(DIST_temp<<8)+DIST[0];   
+ 723   1      //  water_height=pot_height-DIST_temp;  //计算水位高度
+ 724   1      //  water_height_score=(float)((float)water_height*100)/pot_height; //计算水位百分比
+ 725   1        
+ 726   1      }
+ 727          /******************************************定时器初始化***************************************************
+             -****/
+ 728          void time_init (void){            
+ 729   1        TMOD = 0x11;         // 定时/计数器0,1工作于方式1     
+C51 COMPILER V9.60.0.0   MAIN                                                              06/01/2021 22:07:00 PAGE 13  
+
+ 730   1          TH0 = 0x3c;          // 预置产生25ms时基信号   
+ 731   1          TL0 = 0xb0;   
+ 732   1          EA = 1;              // 开总中断   
+ 733   1          ET0 = 1;             // 定时/计数器0允许中断   
+ 734   1          TR0 = 1;             // 开闭定时/计数器0   
+ 735   1      }
+ 736          /*****************************************中断处理程序**********************************************/ 
+ 737          void tiem0(void) interrupt 1{   // T/C0中断服务程序(产生25ms时基信号)   
+ 738   1          cou++;       // 软计数器加1
+ 739   1                             
+ 740   1        SendDate_count++;          //发送数据 延时计时 
+ 741   1        if(SendDate_count>200){SendDate_count=0;} 
+ 742   1      
+ 743   1        cou_uart++;          //串口 超过0.5秒没接收完数据则从头开始
+ 744   1        if(cou_uart>=100){wptr=0;}
+ 745   1      
+ 746   1        buzzer_count++;
+ 747   1        if(buzzer_count>20000){buzzer_count=0;}
+ 748   1      
+ 749   1        ruler_online_time++;    
+ 750   1        if(ruler_online_time>160){ruler_online_state=0;}//4秒无信号认为超声波断开
+ 751   1        pump_online_time++;   
+ 752   1        if(pump_online_time>160){pump_online_state=0;}//4秒无信号认为 水泵 断开
+ 753   1      
+ 754   1        down_state_time++;if(down_state_time>12){down_state=0;}//0.3秒“↓”消失
+ 755   1      
+ 756   1        pump_error_count++;                 //水泵异常检测 时基
+ 757   1        if(pump_error_count>20000){pump_error_count=0;}
+ 758   1      
+ 759   1          if(cou > 39){                 // 40*25=1000ms(1s)   
+ 760   2              cou = 0;               // 软计数器清零   
+ 761   2              sec++;                 // 秒计数器加1(进位10ms*100=1s) 
+ 762   2      //    send_add=!send_add; //切换当前通讯设备
+ 763   2           if(sec > 59){          // 秒计数值到60    
+ 764   3                  sec = 0;           // 秒计数器清零   
+ 765   3                  min++;             // 分计数器加1(进位60s=1m)  
+ 766   3            if(min>59){min=0;}
+ 767   3              }
+ 768   2        
+ 769   2          }   
+ 770   1          TH0 = 0x3c;                // 定时器重装  
+ 771   1          TL0 = 0xb0;   
+ 772   1      }
+ 773          /********************************  EEPORM相关  ************************************************/
+ 774          /*********************************  读一字节  *************************************************/
+ 775          //读一字节，调用前需打开IAP 功能，入口:DPTR = 字节地址，返回:A = 读出字节
+ 776          INT8U Byte_Read(INT16U add)
+ 777          {
+ 778   1          IAP_DATA = 0x00;
+ 779   1          IAP_CONTR = ENABLE_ISP;         //打开IAP 功能, 设置Flash 操作等待时间
+ 780   1          IAP_CMD = 0x01;                 //IAP/ISP/EEPROM 字节读命令
+ 781   1      
+ 782   1          my_unTemp16.un_temp16 = add;
+ 783   1          IAP_ADDRH = my_unTemp16.un_temp8[0];    //设置目标单元地址的高8 位地址
+ 784   1          IAP_ADDRL = my_unTemp16.un_temp8[1];    //设置目标单元地址的低8 位地址
+ 785   1      
+ 786   1          //EA = 0;
+ 787   1          IAP_TRIG = WD1;   //先送 WD1,再送WD2 到ISP/IAP 触发寄存器,每次都需如此
+ 788   1          IAP_TRIG = WD2;   //送完WD2 后，ISP/IAP 命令立即被触发起动
+ 789   1          _nop_();
+ 790   1          //EA = 1;
+ 791   1          IAP_Disable();  //关闭IAP 功能, 清相关的特殊功能寄存器,使CPU 处于安全状态,
+C51 COMPILER V9.60.0.0   MAIN                                                              06/01/2021 22:07:00 PAGE 14  
+
+ 792   1                          //一次连续的IAP 操作完成之后建议关闭IAP 功能,不需要每次都关
+ 793   1          return (IAP_DATA);
+ 794   1      }
+ 795          /*******************************  字节编程  ********************************************************/
+ 796          //字节编程，调用前需打开IAP 功能，入口:DPTR = 字节地址, A= 须编程字节的数据
+ 797          void Byte_Program(INT16U add, INT8U ch)
+ 798          {
+ 799   1          IAP_CONTR = ENABLE_ISP;         //打开 IAP 功能, 设置Flash 操作等待时间
+ 800   1          IAP_CMD = 0x02;                 //IAP/ISP/EEPROM 字节编程命令
+ 801   1      
+ 802   1          my_unTemp16.un_temp16 = add;
+ 803   1          IAP_ADDRH = my_unTemp16.un_temp8[0];    //设置目标单元地址的高8 位地址
+ 804   1          IAP_ADDRL = my_unTemp16.un_temp8[1];    //设置目标单元地址的低8 位地址
+ 805   1      
+ 806   1          IAP_DATA = ch;                  //要编程的数据先送进IAP_DATA 寄存器
+ 807   1          //EA = 0;
+ 808   1          IAP_TRIG = WD1;   //先送 WD1,再送WD2 到ISP/IAP 触发寄存器,每次都需如此
+ 809   1          IAP_TRIG = WD2;   //送完WD2 后，ISP/IAP 命令立即被触发起动
+ 810   1          _nop_();
+ 811   1          //EA = 1;
+ 812   1          IAP_Disable();  //关闭IAP 功能, 清相关的特殊功能寄存器,使CPU 处于安全状态,
+ 813   1                          //一次连续的IAP 操作完成之后建议关闭IAP 功能,不需要每次都关
+ 814   1      }
+ 815          /***************************************  擦除扇区  ************************************************/
+ 816          //擦除扇区, 入口:DPTR = 扇区地址
+ 817          void Sector_Erase(INT16U add)
+ 818          {
+ 819   1          IAP_CONTR = ENABLE_ISP;         //打开IAP 功能, 设置Flash 操作等待时间
+ 820   1          IAP_CMD = 0x03;                 //IAP/ISP/EEPROM 扇区擦除命令
+ 821   1      
+ 822   1          my_unTemp16.un_temp16 = add;
+ 823   1          IAP_ADDRH = my_unTemp16.un_temp8[0];    //设置目标单元地址的高8 位地址
+ 824   1          IAP_ADDRL = my_unTemp16.un_temp8[1];    //设置目标单元地址的低8 位地址
+ 825   1      
+ 826   1          //EA = 0;
+ 827   1          IAP_TRIG = WD1;   //先送 WD1,再送WD2 到ISP/IAP 触发寄存器,每次都需如此
+ 828   1          IAP_TRIG = WD2;   //送完WD2 后，ISP/IAP 命令立即被触发起动
+ 829   1          _nop_();
+ 830   1          //EA = 1;
+ 831   1          IAP_Disable();  //关闭IAP 功能, 清相关的特殊功能寄存器,使CPU 处于安全状态,
+ 832   1                          //一次连续的IAP 操作完成之后建议关闭IAP 功能,不需要每次都关
+ 833   1      }
+ 834          /*************************************  关闭IAP 功能  ********************************************/
+ 835          void IAP_Disable()
+ 836          {
+ 837   1          //关闭IAP 功能, 清相关的特殊功能寄存器,使CPU 处于安全状态,
+ 838   1          //一次连续的IAP 操作完成之后建议关闭IAP 功能,不需要每次都关
+ 839   1          IAP_CONTR = 0;      //关闭IAP 功能
+ 840   1          IAP_CMD   = 0;      //清命令寄存器,使命令寄存器无命令,此句可不用
+ 841   1          IAP_TRIG  = 0;      //清命令触发寄存器,使命令触发寄存器无触发,此句可不用
+ 842   1          IAP_ADDRH = 0;
+ 843   1          IAP_ADDRL = 0;
+ 844   1      }
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =   5474    ----
+   CONSTANT SIZE    =    365    ----
+   XDATA SIZE       =     98       5
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =   ----    ----
+   IDATA SIZE       =   ----    ----
+C51 COMPILER V9.60.0.0   MAIN                                                              06/01/2021 22:07:00 PAGE 15  
+
+   BIT SIZE         =      2    ----
+   EDATA SIZE       =   ----    ----
+   HDATA SIZE       =   ----    ----
+   XDATA CONST SIZE =   ----    ----
+   FAR CONST SIZE   =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

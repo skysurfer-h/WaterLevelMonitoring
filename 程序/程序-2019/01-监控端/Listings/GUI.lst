@@ -1,0 +1,353 @@
+C51 COMPILER V9.60.0.0   GUI                                                               10/21/2021 19:57:23 PAGE 1   
+
+
+C51 COMPILER V9.60.0.0, COMPILATION OF MODULE GUI
+OBJECT MODULE PLACED IN .\Objects\GUI.obj
+COMPILER INVOKED BY: C:\Keil_v5\C51\BIN\C51.EXE OLED_DSP\GUI.c LARGE OMF2 OPTIMIZE(8,SPEED) BROWSE INCDIR(..\STC8_I2C_OL
+                    -ED_Example;.\OLED_DSP;.\User_DSP;.\Common;.\Main) DEBUG PRINT(.\Listings\GUI.lst) TABS(2) OBJECT(.\Objects\GUI.obj)
+
+line level    source
+
+   1          //#include "oled.h"
+   2          
+   3          #include "GUI.h"
+   4          #include "font.h"
+   5          #include "SSD1306.h"
+   6          #include "string.h"
+   7          
+   8          
+   9          //m^n函数
+  10          u32 oled_pow(u8 m,u8 n)
+  11          {
+  12   1        u32 result=1;  
+  13   1        while(n--)result*=m;    
+  14   1        return result;
+  15   1      }
+  16          
+  17          //在指定位置显示一个字符,包括部分字符
+  18          //x:0~127
+  19          //y:0~63
+  20          //mode:0,反白显示;1,正常显示         
+  21          //size:选择字体 16/12 
+  22          void OLED_ShowChar(u8 x,u8 y,u8 chr,uint8_t mode)
+  23          {       
+  24   1        unsigned char c=0,i=0;
+  25   1        c=chr-' ';//得到偏移后的值      
+  26   1        if(x>Max_Column-1){x=0;y=y+2;}
+  27   1      #if SIZE ==16
+  28   1          if(mode)//反白
+  29   1          {
+  30   2          OLED_Set_Pos(x,y);  
+  31   2          for(i=0;i<8;i++)
+  32   2            OLED_WrDat(~F8X16[c*16+i]);
+  33   2          OLED_Set_Pos(x,y+1);
+  34   2          for(i=0;i<8;i++)
+  35   2            OLED_WrDat(~F8X16[c*16+i+8]);
+  36   2          }
+  37   1          else
+  38   1          {
+  39   2            OLED_Set_Pos(x,y);  
+  40   2            for(i=0;i<8;i++)
+  41   2              OLED_WrDat(F8X16[c*16+i]);
+  42   2            OLED_Set_Pos(x,y+1);
+  43   2            for(i=0;i<8;i++)
+  44   2              OLED_WrDat(F8X16[c*16+i+8]);
+  45   2          } 
+  46   1        }
+  47          #else   
+                  OLED_Set_Pos(x,y+1);
+                  for(i=0;i<6;i++)
+                    OLED_WrDat(~F6x8[c][i]);
+                  
+               
+              #endif
+  54          
+C51 COMPILER V9.60.0.0   GUI                                                               10/21/2021 19:57:23 PAGE 2   
+
+  55          //显示2个数字
+  56          //x,y :起点坐标  
+  57          //len :数字的位数
+  58          //size:字体大小
+  59          //mode:模式 0,填充模式;1,叠加模式
+  60          //num:数值(0~4294967295);       
+  61          void OLED_ShowNum(u8 x,u8 y,u32 num,u8 len,u8 size2,u8 mode)
+  62          {           
+  63   1        u8 t,temp;
+  64   1        u8 enshow=0;               
+  65   1        for(t=0;t<len;t++)
+  66   1        {
+  67   2          temp=(num/oled_pow(10,len-t-1))%10;
+  68   2          if(enshow==0&&t<(len-1))
+  69   2          {
+  70   3            if(temp==0)
+  71   3            {
+  72   4              OLED_ShowChar(x+(size2/2)*t,y,' ',mode);
+  73   4              continue;
+  74   4            }else enshow=1; 
+  75   3            
+  76   3          }
+  77   2          OLED_ShowChar(x+(size2/2)*t,y,temp+'0',mode); 
+  78   2        }
+  79   1      } 
+  80          //显示一个字符号串
+  81          
+  82          //******************************************************************
+  83          //函数名：  GUI_DrawFont16
+  84          //功能：    显示单个16X16中文字体
+  85          //输入参数：x,y :起点坐标
+  86          //      fc:前置画笔颜色
+  87          //      bc:背景颜色  
+  88          //      s:字符串地址
+  89          //      mode:模式 0,填充模式;1,叠加模式
+  90          //返回值：  无
+  91          //修改记录：无
+  92          //******************************************************************
+  93          void GUI_DrawFont16(u16 x, u16 y, uint8_t *s,uint8_t mode)
+  94          {
+  95   1        // uint8_t i,j;
+  96   1        u16 k;
+  97   1        u16 HZnum;
+  98   1        // u16 x0=x;
+  99   1       // HZnum=sizeof(tfont16)/sizeof(typFNT_GB16);  //自动统计字库汉字数目
+ 100   1        HZnum=font_Size();  //自动统计字库汉字数目
+ 101   1        for (k=0;k<HZnum;k++) 
+ 102   1        {
+ 103   2          if ((tfont16[k].Index[0]==*s)&&(tfont16[k].Index[1]==*(s+1)))
+ 104   2          {       
+ 105   3            u8 t;
+ 106   3            
+ 107   3            if(!mode) 
+ 108   3            {
+ 109   4              OLED_Set_Pos(x,y);  
+ 110   4              for(t=0;t<16;t++)
+ 111   4              {
+ 112   5                OLED_WrDat(tfont16[k].Msk[t]);
+ 113   5                
+ 114   5              } 
+ 115   4              OLED_Set_Pos(x,y+1);  
+ 116   4              for(t=0;t<16;t++)
+C51 COMPILER V9.60.0.0   GUI                                                               10/21/2021 19:57:23 PAGE 3   
+
+ 117   4              { 
+ 118   5                OLED_WrDat(tfont16[k].Msk[t+16]);
+ 119   5              }
+ 120   4            }
+ 121   3            else//反白
+ 122   3            {
+ 123   4              OLED_Set_Pos(x,y);  
+ 124   4              for(t=0;t<16;t++)
+ 125   4              {
+ 126   5                OLED_WrDat(~tfont16[k].Msk[t]);
+ 127   5                
+ 128   5              } 
+ 129   4              OLED_Set_Pos(x,y+1);  
+ 130   4              for(t=0;t<16;t++)
+ 131   4              { 
+ 132   5                OLED_WrDat(~tfont16[k].Msk[t+16]);
+ 133   5              }
+ 134   4              
+ 135   4            }
+ 136   3            
+ 137   3            continue;
+ 138   3          }
+ 139   2          //continue;  //查找到对应点阵字库立即退出，防止多个汉字重复取模带来影响
+ 140   2        }
+ 141   1      } 
+ 142          
+ 143          /***********功能描述：显示显示BMP图片128×64起始点坐标(x,y),x的范围0～127，y为页的范围0～7****************
+             -*/
+ 144          void OLED_DrawBMP(unsigned char x0, unsigned char y0,unsigned char x1, unsigned char y1,unsigned char BMP[
+             -])
+ 145          {   
+ 146   1        unsigned int j=0;
+ 147   1        unsigned char x,y;
+ 148   1        
+ 149   1        if(y1%8==0) y=y1/8;      
+ 150   1        else y=y1/8+1;
+ 151   1        for(y=y0;y<y1;y++)
+ 152   1        {
+ 153   2          OLED_Set_Pos(x0,y);
+ 154   2          for(x=x0;x<x1;x++)
+ 155   2          {      
+ 156   3            OLED_WrDat(BMP[j++]);       
+ 157   3          }
+ 158   2        }
+ 159   1      } 
+ 160          
+ 161          //******************************************************************
+ 162          //函数名：  Show_Str
+ 163          //功能：    显示一个字符串,包含中英文显示
+ 164          //输入参数：x,y :起点坐标
+ 165          //      fc:前置画笔颜色
+ 166          //      bc:背景颜色
+ 167          //      str :字符串  
+ 168          //      size:字体大小
+ 169          //      mode:模式 0,填充模式;1,叠加模式
+ 170          //返回值：  无
+ 171          //修改记录：无
+ 172          //******************************************************************               
+ 173          
+ 174          void Show_Str(u16 x, u16 y,uint8_t *str,uint8_t size1,uint8_t mode)
+ 175          {         
+ 176   1        u16 x0=x; 
+C51 COMPILER V9.60.0.0   GUI                                                               10/21/2021 19:57:23 PAGE 4   
+
+ 177   1        uint16_t Index=0; 
+ 178   1        uint8_t bHz=0;//字符或者中文 
+ 179   1        while(*str!=0)//数据未结束
+ 180   1        { 
+ 181   2          if(!bHz)
+ 182   2          {
+ 183   3            if(x>128) 
+ 184   3              return; 
+ 185   3            if(*str>0x80)bHz=1;//中文 
+ 186   3            else              //字符
+ 187   3            {          
+ 188   4              if(*str==0x0D)//换行符号
+ 189   4              {         
+ 190   5                y+=size1;
+ 191   5                x=x0;
+ 192   5                str++; 
+ 193   5              }  
+ 194   4              else
+ 195   4              {
+ 196   5                OLED_ShowChar(x,y,*str,mode);
+ 197   5                x+=size1/2;; //字符,为全字的一半  
+ 198   5              } 
+ 199   4              str++; 
+ 200   4            }
+ 201   3          }
+ 202   2          else//中文 
+ 203   2          {   
+ 204   3            if(x>128) 
+ 205   3              return;  
+ 206   3            bHz=0;//有汉字库    
+ 207   3            GUI_DrawFont16(x,y,str,mode);
+ 208   3            str+=2; 
+ 209   3            x+=size1;//下一个汉字偏移     
+ 210   3          }            
+ 211   2        }   
+ 212   1      }
+ 213          
+ 214          //自动居中显示函数
+ 215          void Show_Str_Center(u16 x, u16 y,uint8_t *str,uint8_t size1,uint8_t mode)
+ 216          {         
+ 217   1        
+ 218   1        u16 x0; 
+ 219   1        uint8_t Str_Size;
+ 220   1        uint8_t bHz=0;     //字符或者中文
+ 221   1        Str_Size=strlen((const char *)str);
+ 222   1        //Str_Size=sizeof(&str);
+ 223   1        x=(128-Str_Size*8)/2;
+ 224   1        x0=x;
+ 225   1        
+ 226   1        while(*str!=0)//数据未结束
+ 227   1        { 
+ 228   2          if(!bHz)//!bHz)
+ 229   2          {
+ 230   3            if(x>128) 
+ 231   3              return; 
+ 232   3            if(*str>0x80)
+ 233   3              bHz=1;//中文 
+ 234   3            else              //字符
+ 235   3            {          
+ 236   4              if(*str==0x0D)//换行符号
+ 237   4              {         
+ 238   5                y+=size1;
+C51 COMPILER V9.60.0.0   GUI                                                               10/21/2021 19:57:23 PAGE 5   
+
+ 239   5                x=x0;
+ 240   5                str++; 
+ 241   5              }  
+ 242   4              else
+ 243   4              {
+ 244   5                OLED_ShowChar(x,y,*str,mode);
+ 245   5                x+=size1/2;; //字符,为全字的一半  
+ 246   5              } 
+ 247   4              str++; 
+ 248   4            }
+ 249   3          }else//中文 
+ 250   2          {   
+ 251   3            if(x>128) 
+ 252   3              return;  
+ 253   3            bHz=0;//有汉字库    
+ 254   3            GUI_DrawFont16(x,y,str,mode);
+ 255   3            str+=2; 
+ 256   3            x+=size1;//下一个汉字偏移     
+ 257   3          }            
+ 258   2        }   
+ 259   1      }
+ 260          
+ 261          void GUI_DrawFont16_Str(u16 x, u16 y,uint8_t *str,uint8_t mode)
+ 262          {
+ 263   1        uint8_t *p_Str=str;
+ 264   1        while(*p_Str!=0)//数据未结束
+ 265   1        { 
+ 266   2          GUI_DrawFont16(x,y,p_Str,mode);
+ 267   2          p_Str+=2;
+ 268   2          x+=16;
+ 269   2      
+ 270   2        }
+ 271   1        
+ 272   1        
+ 273   1      }
+ 274          /********************************************显示一个16进制数*********************************************
+             -*******/
+ 275          void Show_16num(u16 x, u16 y,uint8_t temp,uint8_t mode)
+ 276          {
+ 277   1         uint8_t temp_h,temp_l;
+ 278   1         temp_h=(temp&0xf0)>>4;//取出高4位
+ 279   1         temp_l=(temp&0x0f);
+ 280   1         if(temp_h<=0x9)
+ 281   1         {
+ 282   2          OLED_ShowChar(x,y,temp_h+0x30,mode);
+ 283   2        x+=8; 
+ 284   2         }else
+ 285   1         {
+ 286   2          OLED_ShowChar(x,y,temp_h+0x37,mode);
+ 287   2          x+=8;
+ 288   2         }
+ 289   1      
+ 290   1         if(temp_l<=0x9)
+ 291   1         {
+ 292   2          OLED_ShowChar(x,y,temp_l+0x30,mode);
+ 293   2        x+=8; 
+ 294   2         }else
+ 295   1         {
+ 296   2          OLED_ShowChar(x,y,temp_l+0x37,mode);
+ 297   2          x+=8;
+ 298   2         }
+ 299   1      }
+C51 COMPILER V9.60.0.0   GUI                                                               10/21/2021 19:57:23 PAGE 6   
+
+ 300          /********************************************显示一个16进制数组*******************************************
+             -*********/
+ 301          void Show_16array(u16 x, u16 y,uint8_t temp[],uint8_t len,uint8_t mode)//起始x,y坐标；16进制数组；数组长度
+             -；显示模式
+ 302          {
+ 303   1        u8 i;
+ 304   1        for(i=0;i<len;i++)
+ 305   1        {
+ 306   2          Show_16num(x,y,temp[i],mode);
+ 307   2        x+=16;
+ 308   2        }
+ 309   1      
+ 310   1      }
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =   2253    ----
+   CONSTANT SIZE    =   ----    ----
+   XDATA SIZE       =   ----     103
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =   ----    ----
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =   ----    ----
+   EDATA SIZE       =   ----    ----
+   HDATA SIZE       =   ----    ----
+   XDATA CONST SIZE =   ----    ----
+   FAR CONST SIZE   =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

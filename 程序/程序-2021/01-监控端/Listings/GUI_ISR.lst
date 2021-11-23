@@ -1,0 +1,258 @@
+C51 COMPILER V9.59.0.0   GUI_ISR                                                           06/26/2018 17:17:59 PAGE 1   
+
+
+C51 COMPILER V9.59.0.0, COMPILATION OF MODULE GUI_ISR
+OBJECT MODULE PLACED IN .\Objects\GUI_ISR.obj
+COMPILER INVOKED BY: D:\Keil_v5\C51\BIN\C51.EXE OLED_DSP\GUI_ISR.c OMF2 OPTIMIZE(8,SPEED) BROWSE INCDIR(..\STC8_I2C_OLED
+                    -_Example;.\OLED_DSP;.\User_DSP;.\Common;.\Main) DEBUG PRINT(.\Listings\GUI_ISR.lst) TABS(2) OBJECT(.\Objects\GUI_ISR.obj
+                    -)
+
+line level    source
+
+   1          //#include "oled.h"
+   2          
+   3          #include "GUI_ISR.h"
+   4          #include "GUI.h"
+   5          #include "font.h"
+   6          #include "LQ12864.h"
+   7          
+   8          //#include "oledfont.h"  
+   9          
+  10          
+  11          
+  12          
+  13          //m^n函数
+  14          u32 oled_pow_ISR(u8 m,u8 n)
+  15          {
+  16   1        u32 result=1;  
+  17   1        while(n--)result*=m;    
+  18   1        return result;
+  19   1      }
+  20          //在指定位置显示一个字符,包括部分字符
+  21          //x:0~127
+  22          //y:0~63
+  23          //mode:0,反白显示;1,正常显示         
+  24          //size:选择字体 16/12 
+  25          void OLED_ShowChar_ISR(u8 x,u8 y,u8 chr,uint8_t mode)
+  26          {       
+  27   1        unsigned char c=0,i=0;
+  28   1        c=chr-' ';//得到偏移后的值      
+  29   1        if(x>Max_Column-1){x=0;y=y+2;}
+  30   1      #if SIZE ==16
+  31   1          if(mode)//反白
+  32   1          {
+  33   2          OLED_Set_Pos_ISR(x,y);  
+  34   2          for(i=0;i<8;i++)
+  35   2            OLED_WrDat_ISR(~F8X16[c*16+i]);
+  36   2          OLED_Set_Pos_ISR(x,y+1);
+  37   2          for(i=0;i<8;i++)
+  38   2            OLED_WrDat_ISR(~F8X16[c*16+i+8]);
+  39   2          }
+  40   1          else
+  41   1          {
+  42   2            OLED_Set_Pos_ISR(x,y);  
+  43   2            for(i=0;i<8;i++)
+  44   2              OLED_WrDat_ISR(F8X16[c*16+i]);
+  45   2            OLED_Set_Pos_ISR(x,y+1);
+  46   2            for(i=0;i<8;i++)
+  47   2              OLED_WrDat_ISR(F8X16[c*16+i+8]);
+  48   2          } 
+  49   1        }
+  50          #else   
+                  OLED_Set_Pos_ISR(x,y+1);
+                  for(i=0;i<6;i++)
+                    OLED_WrDat_ISR(~F6x8[c][i]);
+C51 COMPILER V9.59.0.0   GUI_ISR                                                           06/26/2018 17:17:59 PAGE 2   
+
+                  
+               
+              #endif
+  57          
+  58          //显示2个数字
+  59          //x,y :起点坐标  
+  60          //len :数字的位数
+  61          //size:字体大小
+  62          //mode:模式 0,填充模式;1,叠加模式
+  63          //num:数值(0~4294967295);       
+  64          void OLED_ShowNum_ISR(u8 x,u8 y,u32 num,u8 len,u8 size2)
+  65          {           
+  66   1        u8 t,temp;
+  67   1        u8 enshow=0;               
+  68   1        for(t=0;t<len;t++)
+  69   1        {
+  70   2          temp=(num/oled_pow_ISR(10,len-t-1))%10;
+  71   2          if(enshow==0&&t<(len-1))
+  72   2          {
+  73   3            if(temp==0)
+  74   3            {
+  75   4              OLED_ShowChar_ISR(x+(size2/2)*t,y,' ',0);
+  76   4              continue;
+  77   4            }else enshow=1; 
+  78   3            
+  79   3          }
+  80   2          OLED_ShowChar_ISR(x+(size2/2)*t,y,temp+'0',0); 
+  81   2        }
+  82   1      } 
+  83          //显示一个字符号串
+  84          
+  85          //******************************************************************
+  86          //函数名：  GUI_DrawFont16
+  87          //功能：    显示单个16X16中文字体
+  88          //输入参数：x,y :起点坐标
+  89          //      fc:前置画笔颜色
+  90          //      bc:背景颜色  
+  91          //      s:字符串地址
+  92          //      mode:模式 0,填充模式;1,叠加模式
+  93          //返回值：  无
+  94          //修改记录：无
+  95          //******************************************************************
+  96          void GUI_DrawFont16_ISR(u16 x, u16 y, uint8_t *s,uint8_t mode)
+  97          {
+  98   1        // uint8_t i,j;
+  99   1        u16 k;
+ 100   1        u16 HZnum;
+ 101   1        // u16 x0=x;
+ 102   1        //HZnum=sizeof(tfont16)/sizeof(typFNT_GB16);  //自动统计汉字数目
+ 103   1        HZnum=font_Size();  //自动统计字库汉字数目
+ 104   1        
+ 105   1        for (k=0;k<HZnum;k++) 
+ 106   1        {
+ 107   2          if ((tfont16[k].Index[0]==*(s))&&(tfont16[k].Index[1]==*(s+1)))
+ 108   2          {       
+ 109   3            u8 t;
+ 110   3            
+ 111   3            if(!mode) 
+ 112   3            {
+ 113   4              OLED_Set_Pos_ISR(x,y);  
+ 114   4              for(t=0;t<16;t++)
+ 115   4              {
+C51 COMPILER V9.59.0.0   GUI_ISR                                                           06/26/2018 17:17:59 PAGE 3   
+
+ 116   5                OLED_WrDat_ISR(tfont16[k].Msk[t]);
+ 117   5                
+ 118   5              } 
+ 119   4              OLED_Set_Pos_ISR(x,y+1);  
+ 120   4              for(t=0;t<16;t++)
+ 121   4              { 
+ 122   5                OLED_WrDat_ISR(tfont16[k].Msk[t+16]);
+ 123   5              }
+ 124   4            }
+ 125   3            else//反白
+ 126   3            {
+ 127   4              OLED_Set_Pos_ISR(x,y);  
+ 128   4              for(t=0;t<16;t++)
+ 129   4              {
+ 130   5                OLED_WrDat_ISR(~tfont16[k].Msk[t]);
+ 131   5                
+ 132   5              } 
+ 133   4              OLED_Set_Pos_ISR(x,y+1);  
+ 134   4              for(t=0;t<16;t++)
+ 135   4              { 
+ 136   5                OLED_WrDat_ISR(~tfont16[k].Msk[t+16]);
+ 137   5              }
+ 138   4              
+ 139   4            }
+ 140   3            
+ 141   3            continue;
+ 142   3          }
+ 143   2          //continue;  //查找到对应点阵字库立即退出，防止多个汉字重复取模带来影响
+ 144   2        }
+ 145   1      } 
+ 146          
+ 147          /***********功能描述：显示显示BMP图片128×64起始点坐标(x,y),x的范围0～127，y为页的范围0～7****************
+             -*/
+ 148          void OLED_DrawBMP_ISR(unsigned char x0, unsigned char y0,unsigned char x1, unsigned char y1,unsigned char 
+             -BMP[])
+ 149          {   
+ 150   1        unsigned int j=0;
+ 151   1        unsigned char x,y;
+ 152   1        
+ 153   1        if(y1%8==0) y=y1/8;      
+ 154   1        else y=y1/8+1;
+ 155   1        for(y=y0;y<y1;y++)
+ 156   1        {
+ 157   2          OLED_Set_Pos(x0,y);
+ 158   2          for(x=x0;x<x1;x++)
+ 159   2          {      
+ 160   3            OLED_WrDat_ISR(BMP[j++]);       
+ 161   3          }
+ 162   2        }
+ 163   1      } 
+ 164          
+ 165          //******************************************************************
+ 166          //函数名：  Show_Str
+ 167          //功能：    显示一个字符串,包含中英文显示
+ 168          //输入参数：x,y :起点坐标
+ 169          //      fc:前置画笔颜色
+ 170          //      bc:背景颜色
+ 171          //      str :字符串  
+ 172          //      size:字体大小
+ 173          //      mode:模式 0,填充模式;1,叠加模式
+ 174          //返回值：  无
+ 175          //修改记录：无
+C51 COMPILER V9.59.0.0   GUI_ISR                                                           06/26/2018 17:17:59 PAGE 4   
+
+ 176          //******************************************************************               
+ 177          
+ 178          void Show_Str_ISR(u16 x, u16 y,  uint8_t *str,uint8_t size,uint8_t mode)
+ 179          {         
+ 180   1        u16 x0=x;                   
+ 181   1        uint8_t bHz=0;     //字符或者中文 
+ 182   1        while(*str!=0)//数据未结束
+ 183   1        { 
+ 184   2          if(!bHz)
+ 185   2          {
+ 186   3            if(x>128) 
+ 187   3              return; 
+ 188   3            if(*str>0x80)bHz=1;//中文 
+ 189   3            else              //字符
+ 190   3            {          
+ 191   4              if(*str==0x0D)//换行符号
+ 192   4              {         
+ 193   5                y+=size;
+ 194   5                x=x0;
+ 195   5                str++; 
+ 196   5              }  
+ 197   4              else
+ 198   4              {
+ 199   5                OLED_ShowChar_ISR(x,y,*str,mode);
+ 200   5                x+=size/2;; //字符,为全字的一半  
+ 201   5              } 
+ 202   4              str++; 
+ 203   4            }
+ 204   3          }else//中文 
+ 205   2          {   
+ 206   3            if(x>128) 
+ 207   3              return;  
+ 208   3            bHz=0;//有汉字库    
+ 209   3            GUI_DrawFont16_ISR(x,y,str,mode);
+ 210   3            
+ 211   3            str+=2; 
+ 212   3            x+=size;//下一个汉字偏移      
+ 213   3          }            
+ 214   2        }   
+ 215   1      }
+ 216          
+ 217          
+ 218          
+ 219          
+ 220          
+ 221          
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =   1167    ----
+   CONSTANT SIZE    =   ----    ----
+   XDATA SIZE       =   ----    ----
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =   ----      59
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =   ----    ----
+   EDATA SIZE       =   ----    ----
+   HDATA SIZE       =   ----    ----
+   XDATA CONST SIZE =   ----    ----
+   FAR CONST SIZE   =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

@@ -1,0 +1,222 @@
+C51 COMPILER V9.60.0.0   DS1302                                                            05/20/2021 16:34:12 PAGE 1   
+
+
+C51 COMPILER V9.60.0.0, COMPILATION OF MODULE DS1302
+OBJECT MODULE PLACED IN .\Objects\ds1302.obj
+COMPILER INVOKED BY: C:\Keil_v5\C51\BIN\C51.EXE User_DSP\ds1302.c LARGE OMF2 OPTIMIZE(8,SPEED) BROWSE INCDIR(..\STC8_I2C
+                    -_OLED_Example;.\OLED_DSP;.\User_DSP;.\Common;.\Main) DEBUG PRINT(.\Listings\ds1302.lst) TABS(2) OBJECT(.\Objects\ds1302.
+                    -obj)
+
+line level    source
+
+   1          #include <stc8fxx.h>
+   2          #include <string.h>    //×Ö·û´®´¦Àí
+   3          #include "ds1302.h"
+   4          #include "GUI.h"
+   5          #define uchar unsigned char
+   6          //¶¨ÒåÈ«¾Ö±äÁ¿
+   7          unsigned int year;
+   8          uchar   ds1302_sec,ds1302_min,ds1302_hour,day,month,week;    //Ê±¼ä±äÁ¿
+   9          //DS1302µØÖ·¶¨Òå
+  10          #define ds1302_sec_add      0x80    //ÃëÊý¾ÝµØÖ·
+  11          #define ds1302_min_add      0x82    //·ÖÊý¾ÝµØÖ·
+  12          #define ds1302_hr_add     0x84    //Ê±Êý¾ÝµØÖ·
+  13          #define ds1302_date_add     0x86    //ÈÕÊý¾ÝµØÖ·
+  14          #define ds1302_month_add    0x88    //ÔÂÊý¾ÝµØÖ·
+  15          #define ds1302_day_add      0x8a    //ÐÇÆÚÊý¾ÝµØÖ·
+  16          #define ds1302_year_add     0x8c    //ÄêÊý¾ÝµØÖ·
+  17          #define ds1302_control_add    0x8e    //¿ØÖÆÊý¾ÝµØÖ·
+  18          #define ds1302_charger_add    0x90           
+  19          #define ds1302_clkburst_add   0xbe
+  20          //³õÊ¼Ê±¼ä¶¨Òå
+  21          //uchar time_buf[8] = {0x20,0x10,0x09,0x14,0x23,0x59,0x50,0x02};//³õÊ¼Ê±¼ä Äê¡¢ÔÂ¡¢ÈÕ¡¢Ê±¡¢·Ö¡¢Ãë¡¢ÖÜ
+  22          uchar time_buf[8] = {0x20,0x18,0x11,0x27,0x20,0x00,0x50,0x02};//³õÊ¼Ê±¼ä £¨2018Äê11ÔÂ27ÈÕ20Ê±00·Ö50ÃëÐÇÆÚ¶
+             -þ£©
+  23          uchar readtime[14];//µ±Ç°Ê±¼ä
+  24          uchar sec_buf=0;  //Ãë»º´æ
+  25          uchar sec_flag=0; //Ãë±êÖ¾Î»
+  26          
+  27          //    write_clock(0x8e,0x00);//ÔÊÐíÐ´²Ù×÷
+  28          //    write_clock(0x8c,0x18);//Äê
+  29          //    write_clock(0x8a,0x02);//ÐÇÆÚ
+  30          //    write_clock(0x88,0x11);//ÔÂ
+  31          //    write_clock(0x86,0x27);//ÈÕ
+  32          //    write_clock(0x84,0x20);//Ð¡Ê±
+  33          //    write_clock(0x82,0x00);//·ÖÖÓ
+  34          //    write_clock(0x80,0x50);//Ãë
+  35          
+  36          //DS1302³õÊ¼»¯º¯Êý
+  37          void ds1302_init(void) 
+  38          {
+  39   1        RST=0;      //RST½ÅÖÃµÍ
+  40   1        SCK=0;      //SCK½ÅÖÃµÍ
+  41   1      }
+  42          //ÏòDS1302Ð´ÈëÒ»×Ö½ÚÊý¾Ý
+  43          void ds1302_write_byte(uchar addr, uchar d) 
+  44          {
+  45   1        uchar i;
+  46   1        RST=1;          //Æô¶¯DS1302×ÜÏß  
+  47   1        //Ð´ÈëÄ¿±êµØÖ·£ºaddr
+  48   1        addr = addr & 0xFE;   //×îµÍÎ»ÖÃÁã£¬¼Ä´æÆ÷0Î»Îª0Ê±Ð´£¬Îª1Ê±¶Á
+  49   1        for (i = 0; i < 8; i ++) {
+  50   2          if (addr & 0x01) {
+  51   3            IO=1;
+  52   3            }
+C51 COMPILER V9.60.0.0   DS1302                                                            05/20/2021 16:34:12 PAGE 2   
+
+  53   2          else {
+  54   3            IO=0;
+  55   3            }
+  56   2          SCK=1;      //²úÉúÊ±ÖÓ
+  57   2          SCK=0;
+  58   2          addr = addr >> 1;
+  59   2          } 
+  60   1        //Ð´ÈëÊý¾Ý£ºd
+  61   1        for (i = 0; i < 8; i ++) {
+  62   2          if (d & 0x01) {
+  63   3            IO=1;
+  64   3            }
+  65   2          else {
+  66   3            IO=0;
+  67   3            }
+  68   2          SCK=1;    //²úÉúÊ±ÖÓ
+  69   2          SCK=0;
+  70   2          d = d >> 1;
+  71   2          }
+  72   1        RST=0;    //Í£Ö¹DS1302×ÜÏß
+  73   1      }
+  74          
+  75          //´ÓDS1302¶Á³öÒ»×Ö½ÚÊý¾Ý
+  76          uchar ds1302_read_byte(uchar addr) {
+  77   1      
+  78   1        uchar i,temp; 
+  79   1        RST=1;          //Æô¶¯DS1302×ÜÏß
+  80   1        //Ð´ÈëÄ¿±êµØÖ·£ºaddr
+  81   1        addr = addr | 0x01;    //×îµÍÎ»ÖÃ¸ß£¬¼Ä´æÆ÷0Î»Îª0Ê±Ð´£¬Îª1Ê±¶Á
+  82   1        for (i = 0; i < 8; i ++) {
+  83   2          if (addr & 0x01) {
+  84   3            IO=1;
+  85   3            }
+  86   2          else {
+  87   3            IO=0;
+  88   3            }
+  89   2          SCK=1;
+  90   2          SCK=0;
+  91   2          addr = addr >> 1;
+  92   2          } 
+  93   1        //Êä³öÊý¾Ý£ºtemp
+  94   1        for (i = 0; i < 8; i ++) {
+  95   2          temp = temp >> 1;
+  96   2          if (IO) {
+  97   3            temp |= 0x80;
+  98   3            }
+  99   2          else {
+ 100   3            temp &= 0x7F;
+ 101   3            }
+ 102   2          SCK=1;
+ 103   2          SCK=0;
+ 104   2          } 
+ 105   1        RST=0;          //Í£Ö¹DS1302×ÜÏß
+ 106   1        return temp;
+ 107   1      }
+ 108          //ÏòDS302Ð´ÈëÊ±ÖÓÊý¾Ý
+ 109          void ds1302_write_time(void) 
+ 110          {
+ 111   1        ds1302_write_byte(ds1302_control_add,0x00);     //¹Ø±ÕÐ´±£»¤ 
+ 112   1        ds1302_write_byte(ds1302_sec_add,0x80);       //ÔÝÍ£Ê±ÖÓ 
+ 113   1        //ds1302_write_byte(ds1302_charger_add,0xa9);     //ä¸Á÷³äµç 
+ 114   1        ds1302_write_byte(ds1302_year_add,time_buf[1]);   //Äê 
+C51 COMPILER V9.60.0.0   DS1302                                                            05/20/2021 16:34:12 PAGE 3   
+
+ 115   1        ds1302_write_byte(ds1302_month_add,time_buf[2]);  //ÔÂ 
+ 116   1        ds1302_write_byte(ds1302_date_add,time_buf[3]);   //ÈÕ 
+ 117   1        ds1302_write_byte(ds1302_hr_add,time_buf[4]);   //Ê± 
+ 118   1        ds1302_write_byte(ds1302_min_add,time_buf[5]);    //·Ö
+ 119   1        ds1302_write_byte(ds1302_sec_add,time_buf[6]);    //Ãë
+ 120   1        ds1302_write_byte(ds1302_day_add,time_buf[7]);    //ÖÜ 
+ 121   1        ds1302_write_byte(ds1302_control_add,0x80);     //´ò¿ªÐ´±£»¤     
+ 122   1      }
+ 123          //´ÓDS302¶Á³öÊ±ÖÓÊý¾Ý
+ 124          void ds1302_read_time(void)  
+ 125          {
+ 126   1        time_buf[1]=ds1302_read_byte(ds1302_year_add+1);    //Äê 
+ 127   1        time_buf[2]=ds1302_read_byte(ds1302_month_add+1);   //ÔÂ 
+ 128   1        time_buf[3]=ds1302_read_byte(ds1302_date_add+1);    //ÈÕ 
+ 129   1        time_buf[4]=ds1302_read_byte(ds1302_hr_add+1);    //Ê± 
+ 130   1        time_buf[5]=ds1302_read_byte(ds1302_min_add+1);   //·Ö 
+ 131   1        time_buf[6]=(ds1302_read_byte(ds1302_sec_add+1))&0x7f;//Ãë£¬ÆÁ±ÎÃëµÄµÚ7Î»£¬±ÜÃâ³¬³ö59
+ 132   1        time_buf[7]=ds1302_read_byte(ds1302_day_add+1);   //ÖÜ 
+ 133   1        
+ 134   1        year=((time_buf[0]>>4)*1000+(time_buf[0]&0x0F)*100+(time_buf[1]>>4)*10+(time_buf[1]&0x0F)); //×ª»»10½øÖÆ
+ 135   1        month=((time_buf[2]>>4)*10+(time_buf[2]&0x0F));
+ 136   1        day=((time_buf[3]>>4)*10+(time_buf[3]&0x0F));
+ 137   1        ds1302_hour=((time_buf[4]>>4)*10+(time_buf[4]&0x0F));
+ 138   1        ds1302_min=((time_buf[5]>>4)*10+(time_buf[5]&0x0F));
+ 139   1        ds1302_sec=((time_buf[6]>>4)*10+(time_buf[6]&0x0F));
+ 140   1          week=((time_buf[7]>>4)*10+(time_buf[7]&0x0F));    
+ 141   1      }
+ 142          
+ 143          //void set_1302(){
+ 144          //      unsigned char f;
+ 145          //    write_clock(0x8e,0x00);//ÔÊÐíÐ´²Ù×÷
+ 146          //    write_clock(0x8c,year);//Äê
+ 147          //    write_clock(0x8a,week);//ÐÇÆÚ
+ 148          //    write_clock(0x88,month);//ÔÂ
+ 149          //    write_clock(0x86,day);//ÈÕ
+ 150          //    write_clock(0x84,hour);//Ð¡Ê±
+ 151          //    write_clock(0x82,min);//·ÖÖÓ
+ 152          //    write_clock(0x80,sec);//Ãë
+ 153          //    write_clock(0x90,0x05);//³äµçÉèÖÃ£¨0x05²»³äµç£¬0xa5³äµç£© 
+ 154          //    for(f=0;f<60;f=f+2){//Çå³ýÄÖÖÓRAMÎ»Îª0
+ 155          //      write_clock(0xc0+f,0x00);
+ 156          //    }
+ 157          //    write_clock(0xC4,0x09);//±³¹â³õÊ¼ÎªÁÁ¶È9
+ 158          //    write_clock(0x8e,0x80);//½ûÖ¹Ð´²Ù×÷   
+ 159          //}
+ 160          //void rest_1302(){
+ 161          //  unsigned char f;
+ 162          //    write_clock(0x8e,0x00);//ÔÊÐíÐ´²Ù×÷
+ 163          //    write_clock(0x8c,0x18);//Äê
+ 164          //    write_clock(0x8a,0x02);//ÐÇÆÚ
+ 165          //    write_clock(0x88,0x11);//ÔÂ
+ 166          //    write_clock(0x86,0x27);//ÈÕ
+ 167          //    write_clock(0x84,0x20);//Ð¡Ê±
+ 168          //    write_clock(0x82,0x00);//·ÖÖÓ
+ 169          //    write_clock(0x80,0x50);//Ãë
+ 170          //    write_clock(0x90,0x05);//³äµçÉèÖÃ£¨0x05²»³äµç£¬0xa5³äµç£© 
+ 171          //    for(f=0;f<60;f=f+2){//Çå³ýÄÖÖÓRAMÎ»Îª0
+ 172          //      write_clock(0xc0+f,0x00);
+ 173          //    }
+ 174          //    write_clock(0xC4,0x09);//±³¹â³õÊ¼ÎªÁÁ¶È9
+ 175          //    write_clock(0x8e,0x80);//½ûÖ¹Ð´²Ù×÷
+ 176          //}
+C51 COMPILER V9.60.0.0   DS1302                                                            05/20/2021 16:34:12 PAGE 4   
+
+ 177          //void time_display(){
+ 178          //
+ 179          //     read_clockS();
+ 180          //             OLED_ShowNum(8,2,hh/16+0x30,2,16);//Êý×Ö£¬³¤¶È£¬
+ 181          //    OLED_ShowNum(8,4,mm,2,16);//Êý×Ö£¬³¤¶È£¬
+ 182          //    OLED_ShowNum(8,6,ss,2,16);//Êý×Ö£¬³¤¶È£¬
+ 183          //
+ 184          //
+ 185          //}
+ 186          
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =    489    ----
+   CONSTANT SIZE    =   ----    ----
+   XDATA SIZE       =     32    ----
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =   ----    ----
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =   ----    ----
+   EDATA SIZE       =   ----    ----
+   HDATA SIZE       =   ----    ----
+   XDATA CONST SIZE =   ----    ----
+   FAR CONST SIZE   =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

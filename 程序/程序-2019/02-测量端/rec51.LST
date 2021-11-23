@@ -1,0 +1,294 @@
+C51 COMPILER V9.60.0.0   REC51                                                             10/21/2021 19:58:47 PAGE 1   
+
+
+C51 COMPILER V9.60.0.0, COMPILATION OF MODULE REC51
+OBJECT MODULE PLACED IN rec51.OBJ
+COMPILER INVOKED BY: C:\Keil_v5\C51\BIN\C51.EXE rec51.c OPTIMIZE(8,SPEED) BROWSE DEBUG OBJECTEXTEND TABS(2)
+
+line level    source
+
+   1          #include <stc8fxx.h>       //包含单片机寄存器的头文件
+   2          #include "intrins.h"//头文件 
+   3          #define uchar unsigned char
+   4          #define uint  unsigned int
+   5          #define MAIN_Fosc   12000000L //定义主时钟
+   6          
+   7          sbit led_send=P1^5; 
+   8          sbit led_online=P1^6; 
+   9          sbit Trig=P1^2; 
+  10          sbit Echo=P1^3;
+  11          sbit set_jdy40=P1^4;  
+  12          uchar cou=0,sec=0,min=0,cou2=0;
+  13          uint DIST_temp=0;
+  14          uchar DIST[2]={0x12,0x34};//距离寄存
+  15          uchar power_state=0x01;
+  16          uchar power=0;     //在线标志
+  17          uint power_time=0;    //工作计时
+  18          uchar add=0,add2=0;
+  19          uchar online=0;
+  20          uint online_time=0;
+  21          uchar send_state=0;
+  22          uint send_time=0;
+  23          
+  24          uint dist_get_count=0;
+  25          
+  26          void SendDate();
+  27          void RecDate();
+  28          void time_init (void);
+  29          void dist_init();
+  30          void dist_get();
+  31          /******************************延时****************************************/
+  32          void  delay_ms(unsigned int ms)
+  33          {
+  34   1         unsigned int i;
+  35   1         do{
+  36   2              i = MAIN_Fosc / 12000;
+  37   2            while(--i)  ;   //14T per loop
+  38   2           }while(--ms);
+  39   1      }
+  40          void Delay20us()    //@12.000MHz
+  41          {
+  42   1        unsigned char i;
+  43   1      
+  44   1        _nop_();
+  45   1        _nop_();
+  46   1        i = 57;
+  47   1        while (--i);
+  48   1      }
+  49          /*******************************uart*************************************/
+  50          bit busy,uart_state=0;
+  51          uchar wptr=0,temp;
+  52          uchar cou_uart=0;
+  53          uchar rptr;
+  54          uchar  ture_state=0;
+  55          uchar buffer[32],Date_Send[3];//接收和发送的数据数组
+C51 COMPILER V9.60.0.0   REC51                                                             10/21/2021 19:58:47 PAGE 2   
+
+  56          uchar date_now=0x00,date_last=0x00;
+  57          uchar RX_begin=0;RX_finish=0;
+  58          uchar date_finish_now=0x00;date_finish_last=0x00;
+  59          uchar buffer_begin=0;  //当前帧数据起始位置
+  60          
+  61          void UartIsr() interrupt 4 using 1
+  62          {
+  63   1          if (TI)
+  64   1          {
+  65   2              TI = 0;
+  66   2              busy = 0;
+  67   2          }
+  68   1          if (RI)
+  69   1          {
+  70   2          RI = 0;
+  71   2              date_now = SBUF;
+  72   2              if((date_now==0x5a)&&(date_last==0xaa)){    //起始码为  aa   5a
+  73   3            RX_begin=1;        //收到起始码
+  74   3            buffer_begin=wptr+1;//数据内容第一字节位置
+  75   3      //      test=!test;
+  76   3            }
+  77   2          if(RX_begin==1){
+  78   3            buffer[wptr]=date_now;
+  79   3          }
+  80   2          if(wptr>4){
+  81   3            date_finish_now=buffer[wptr];date_finish_last=buffer[wptr-1];
+  82   3            if((date_finish_now==0xc3)&&(date_finish_last==0xcc)){//结束码  cc  c3
+  83   4              RX_begin=0;//结束接收这一帧数据
+  84   4              wptr=0; 
+  85   4              RX_finish=1;//完成接收一帧数据
+  86   4      //        test=0;
+  87   4            }
+  88   3          }
+  89   2          wptr++;
+  90   2          if(wptr>30){wptr=0;}
+  91   2          date_last=date_now;
+  92   2            cou_uart=0;  
+  93   2          }
+  94   1      }
+  95          
+  96          void UartInit(void) //9600bps@12.000MHz
+  97          {
+  98   1        SCON = 0x50;    //8位数据,可变波特率
+  99   1        AUXR |= 0x01;   //串口1选择定时器2为波特率发生器
+ 100   1        AUXR |= 0x04;   //定时器2时钟为Fosc,即1T
+ 101   1        T2L = 0xC7;   //设定定时初值
+ 102   1        T2H = 0xFE;   //设定定时初值
+ 103   1        AUXR |= 0x10;   //启动定时器2
+ 104   1      
+ 105   1          wptr = 0x00;
+ 106   1          rptr = 0x00;
+ 107   1          busy = 0;
+ 108   1      }
+ 109          
+ 110          void UartSend(char dat)
+ 111          {
+ 112   1          while (busy);
+ 113   1          busy = 1;
+ 114   1          SBUF = dat;
+ 115   1      }
+ 116          
+ 117          /*********************************************主函数******************************************************
+C51 COMPILER V9.60.0.0   REC51                                                             10/21/2021 19:58:47 PAGE 3   
+
+             -***********/
+ 118          /*********************************************主函数******************************************************
+             -***********/
+ 119          void main()
+ 120          {
+ 121   1          unsigned char i=0,j=0,a=0,b=0,c=0;
+ 122   1        set_jdy40=1;//透传模式
+ 123   1        led_send=0;led_online=0;
+ 124   1        delay_ms(1000);
+ 125   1        led_send=1;led_online=1;
+ 126   1        UartInit();
+ 127   1          ES = 1;
+ 128   1          EA = 1;
+ 129   1        time_init();
+ 130   1        dist_init();
+ 131   1        while(1)
+ 132   1        {
+ 133   2           RecDate();   //接收数据
+ 134   2           if(online==1){
+ 135   3              led_online=0;
+ 136   3            if(dist_get_count>49){   //每50*5ms 测距一次     备注：监控端每250ms接收一次数据
+ 137   4              dist_get();//测距
+ 138   4              dist_get_count=0; //测距时间计数清零
+ 139   4            }     
+ 140   3            if(send_state==1){
+ 141   4              delay_ms(10);    //等待发送端无线模块恢复接收状态 
+ 142   4              SendDate();
+ 143   4              send_state=0;
+ 144   4            }
+ 145   3          }else{led_online=1;}
+ 146   2        } 
+ 147   1      }
+ 148          /*****************************************发送数据处理****************************************************
+             -*******/
+ 149          void SendDate(){
+ 150   1        uchar a,b;
+ 151   1        led_send=0;
+ 152   1          Date_Send[0]=0xcd;   //设备地址cd
+ 153   1        Date_Send[1]=DIST[0]; //距离低8位
+ 154   1        Date_Send[2]=DIST[1];  //距离高8位
+ 155   1        UartSend(0xaa);//起始码
+ 156   1        UartSend(0x5a);
+ 157   1        for(b=0;b<3;b++){     //发送三遍
+ 158   2            for (a=0; a<3; a++)
+ 159   2            {
+ 160   3               UartSend(Date_Send[a]);
+ 161   3            }
+ 162   2        }
+ 163   1        UartSend(0xcc);//结束码
+ 164   1        UartSend(0xc3);
+ 165   1        delay_ms(15);
+ 166   1        send_state=0;//允许发送 标志 
+ 167   1        led_send=1;  
+ 168   1      }
+ 169          void RecDate(){
+ 170   1        uchar i=0;
+ 171   1        i=buffer_begin; //有效数据在数组中起始位置
+ 172   1        if(RX_finish==1){
+ 173   2           //重复校验
+ 174   2           if(buffer[i]==buffer[i+3]&&buffer[i]==buffer[i+6]&&buffer[i+1]==buffer[i+4]&&buffer[i+1]==buffer[i+7]&
+             -&buffer[i+2]==buffer[i+5]&&buffer[i+2]==buffer[i+8])//校验无误
+ 175   2           {
+C51 COMPILER V9.60.0.0   REC51                                                             10/21/2021 19:58:47 PAGE 4   
+
+ 176   3              add=buffer[i];
+ 177   3            add2=buffer[i+1];
+ 178   3            if(add==0xab&&add2==0xcd){
+ 179   4                online=1;//在线
+ 180   4              online_time=0;//在线计时清零
+ 181   4              send_state=1;  //允许发送标志
+ 182   4      //        send_time=0;
+ 183   4            }
+ 184   3           }
+ 185   2           RX_finish=0; //串口收到数据标志 清零 等待下次接收到数据
+ 186   2           wptr=0;
+ 187   2           uart_state=0; //串口收到数据标志 清零 等待下次接收到数据
+ 188   2         }
+ 189   1      }
+ 190          /**********************************************超声波相关*************************************************
+             -************/
+ 191          void dist_init()
+ 192          {
+ 193   1          P1M1=0x08;//超声波输入引脚 设置为高阻输入
+ 194   1        Trig=0;  //超声波模块引脚
+ 195   1        Echo=0; 
+ 196   1        TMOD&=0x10;//定时器1 16位不自动重装载
+ 197   1        TR1=0; //定时器关
+ 198   1        delay_ms(100);//等待超声波模块稳定
+ 199   1      }
+ 200          void dist_get()
+ 201          {
+ 202   1         TH1=0;  
+ 203   1         TL1=0;
+ 204   1      
+ 205   1         Trig=1;     //给20us触发信号
+ 206   1         Delay20us();
+ 207   1         Trig=0;
+ 208   1      
+ 209   1         while(!Echo); //等待回响信号变高电平
+ 210   1         TR1=1;    //启动定时器
+ 211   1         while(Echo);  //等待回响信号变低电平
+ 212   1         TR1=0;    //关闭定时器
+ 213   1      
+ 214   1         DIST_temp=((float)((float)TH1*256+(float)TL1)*0.168);   //单位mm    声速设336m/s，既0.336mm/us, 距离 乘
+             -1/2
+ 215   1         DIST[0]=DIST_temp;    //低8位
+ 216   1         DIST[1]=(DIST_temp>>8); //高8位
+ 217   1      }
+ 218          /******************************************定时器初始化***************************************************
+             -****/
+ 219          void time_init (void){            
+ 220   1      //  TMOD &= 0x01;         // 定时/计数器0 工作于方式1
+ 221   1        AUXR &= 0x7F;   //定时器时钟12T模式
+ 222   1        TMOD &= 0xF0;   //设置定时器模式     
+ 223   1        TL0 = 0x78;   //设置定时初值
+ 224   1        TH0 = 0xEC;   //设置定时初值 
+ 225   1          EA = 1;              // 开总中断   
+ 226   1          ET0 = 1;             // 定时/计数器0允许中断   
+ 227   1          TR0 = 1;             // 开闭定时/计数器0   
+ 228   1      }
+ 229          /*****************************************中断处理程序**********************************************/ 
+ 230          void tiem0(void) interrupt 1{   // T/C0中断服务程序(产生5ms时基信号)   
+ 231   1          cou++;                      // 软计数器加1 
+ 232   1        cou2++;
+ 233   1        if(cou2>200){cou2=0;}//专用计时 发送数据间隔时间 
+ 234   1        cou_uart++;
+C51 COMPILER V9.60.0.0   REC51                                                             10/21/2021 19:58:47 PAGE 5   
+
+ 235   1        if(cou_uart>=100){wptr=0;} //超过0.5秒没接收完数据则从头开始
+ 236   1      //  send_time++;
+ 237   1      //  if(send_time>200){send_time=0;send_state=0;}
+ 238   1        dist_get_count++;
+ 239   1        if(dist_get_count>10000){dist_get_count=0;}
+ 240   1      
+ 241   1          if(cou > 200){                 // 200*5=1000ms(1s)   
+ 242   2              cou = 0;               // 软计数器清零   
+ 243   2              sec++;                 // 秒计数器加1(进位10ms*100=1s) 
+ 244   2          online_time++;                //在线30秒
+ 245   2          if(online_time>29){online_time=0;online=0;}
+ 246   2      
+ 247   2           if(sec > 59){          // 秒计数值到60    
+ 248   3                  sec = 0;           // 秒计数器清零   
+ 249   3                  min++;             // 分计数器加1(进位60s=1m)  
+ 250   3            if(min>59){min=0;}
+ 251   3              }
+ 252   2        
+ 253   2          }   
+ 254   1        TL0 = 0x78;   //设置定时初值
+ 255   1        TH0 = 0xEC;   //设置定时初值  
+ 256   1      }
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =    773    ----
+   CONSTANT SIZE    =   ----    ----
+   XDATA SIZE       =   ----    ----
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =     71       5
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =      2    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)
